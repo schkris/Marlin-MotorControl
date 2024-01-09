@@ -29,6 +29,7 @@
  */
 
 #include "MarlinCore.h"
+#include <DHT11.h>
 
 #include "HAL/shared/Delay.h"
 #include "HAL/shared/esp_wifi.h"
@@ -1133,6 +1134,10 @@ inline void tmc_standby_setup() {
  *  - Open Touch Screen Calibration screen, if not calibrated
  *  - Set Marlin to RUNNING State
  */
+
+#define DHT11_PIN Y_STOP_PIN  // Replace Y_STOP_PIN with the actual pin number you're using
+DHT11 dht11(DHT11_PIN);
+
 void setup() {
   #ifdef FASTIO_INIT
     FASTIO_INIT();
@@ -1700,32 +1705,37 @@ void controlStepperMotor(int speed) {
 
 void loop() 
 {
-  do 
+  // do
+  // {
+  
+  // digitalWrite(Y_MIN_PIN, HIGH);
+  // digitalWrite(Y_STEP_PIN, HIGH);
+  // digitalWrite(Y_DIR_PIN, HIGH);
+
+  // Read encoder state
+  int newEncoderState = digitalRead(BTN_EN1) << 1 | digitalRead(BTN_EN2);
+
+  if (digitalRead(BTN_ENC) == LOW) 
   {
-    // Read encoder state
-    int newEncoderState = digitalRead(BTN_EN1) << 1 | digitalRead(BTN_EN2);
+    stepperSpeed = 0;
+  }
 
-    if (digitalRead(BTN_ENC) == LOW) 
-    {
-      stepperSpeed = 0;
-    }
+  // Debounce delay (adjust as needed)
+  // delay(10);
 
-    // Debounce delay (adjust as needed)
-    // delay(10);
+  // Check for changes in encoder state
+  if (newEncoderState != lastEncoderState) {
+      if ((lastEncoderState == 0b01 && newEncoderState == 0b11) || 
+          (lastEncoderState == 0b10 && newEncoderState == 0b00)) {
+          stepperSpeed += 10; // Clockwise
+      } else if ((lastEncoderState == 0b11 && newEncoderState == 0b01) || 
+                (lastEncoderState == 0b00 && newEncoderState == 0b10)) {
+          stepperSpeed -= 10; // Counterclockwise
+      }
+      stepperSpeed = constrain(stepperSpeed, -255, 255);
+  }
 
-    // Check for changes in encoder state
-    if (newEncoderState != lastEncoderState) {
-        if ((lastEncoderState == 0b01 && newEncoderState == 0b11) || 
-            (lastEncoderState == 0b10 && newEncoderState == 0b00)) {
-            stepperSpeed += 10; // Clockwise
-        } else if ((lastEncoderState == 0b11 && newEncoderState == 0b01) || 
-                  (lastEncoderState == 0b00 && newEncoderState == 0b10)) {
-            stepperSpeed -= 10; // Counterclockwise
-        }
-        stepperSpeed = constrain(stepperSpeed, -255, 255);
-    }
-
-    lastEncoderState = newEncoderState; // Update last state
+  lastEncoderState = newEncoderState; // Update last state
 
     /*
     static unsigned long lastChangeTime = 0;
@@ -1736,34 +1746,71 @@ void loop()
     }
     */
     
-    // Control stepper motor
-    controlStepperMotor(stepperSpeed); // Implement this function
+  // Control stepper motor
+  controlStepperMotor(stepperSpeed);
+
+  static unsigned long lastReadTime = 0;
+  char tempBuffer[64];
+  if (millis() - lastReadTime > 2000) { // Read every 2 seconds
+      int temperature = dht11.readTemperature();
+      int humidity = dht11.readHumidity();
+      // Check the results of the readings
+      if (temperature != DHT11::ERROR_CHECKSUM && temperature != DHT11::ERROR_TIMEOUT &&
+          humidity != DHT11::ERROR_CHECKSUM && humidity != DHT11::ERROR_TIMEOUT) {
+          // Format temperature and humidity readings
+          snprintf(tempBuffer, sizeof(tempBuffer), "Temp: %dC, Hum: %d%%", temperature, humidity);
+      } 
+      else 
+      {
+        if (temperature == DHT11::ERROR_TIMEOUT)
+        {
+          snprintf(tempBuffer, sizeof(tempBuffer), "Temp Err Time");
+        }
+        else if(temperature == DHT11::ERROR_CHECKSUM)
+        {
+          snprintf(tempBuffer, sizeof(tempBuffer), "Temp Err Sum");
+        }
+        else if(humidity == DHT11::ERROR_TIMEOUT)
+        {
+          snprintf(tempBuffer, sizeof(tempBuffer), "Hum Err Time");
+        }
+        else if(humidity == DHT11::ERROR_CHECKSUM)
+        {
+          snprintf(tempBuffer, sizeof(tempBuffer), "Hum Err Sum");
+        }
+      }
+      lastReadTime = millis();
+  }
     
-    // Display stepper speed for debugging
-    char buffer[10]; // Buffer for converting integer to string
-    itoa(stepperSpeed, buffer, 10); // Convert stepperSpeed to string
-    ui.set_status(buffer, true); // Display stepper speed on LCD
-
-    idle();
-
+  // Display combined information (stepper speed and temperature/humidity)
+  char combinedBuffer[80]; // Buffer to combine stepper speed and temp/humidity
+  snprintf(combinedBuffer, sizeof(combinedBuffer), "Speed: %d, %s", stepperSpeed, tempBuffer);
+  ui.set_status(combinedBuffer, true); // Display combined info on LCD
+  
+  idle();
+    /*
     #if ENABLED(SDSUPPORT)
       if (card.flag.abort_sd_printing) abortSDPrinting();
       if (marlin_state == MF_SD_COMPLETE) finishSDPrinting();
     #endif
+    */
 
-    queue.advance();
+  queue.advance();
 
+    /*
     #if EITHER(POWER_OFF_TIMER, POWER_OFF_WAIT_FOR_COOLDOWN)
       powerManager.checkAutoPowerOff();
     #endif
+    */
 
-    endstops.event_handler();
+  endstops.event_handler();
 
+    /*
     TERN_(HAS_TFT_LVGL_UI, printer_state_polling());
 
     TERN_(MARLIN_TEST_BUILD, runPeriodicTests());
-    
+    */
 
-  } while (ENABLED(__AVR__)); // Loop forever on slower (AVR) boards
+  // } while (ENABLED(__AVR__)); // Loop forever on slower (AVR) boards
 }
 
